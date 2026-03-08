@@ -1,0 +1,35 @@
+# Локальные настройки и секреты (никогда не коммитить)
+.env
+
+# Окружение и сборка
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.so
+.Python
+*.egg-info/
+.eggs/
+dist/
+build/
+*.spec.bak
+
+# PyInstaller (папки сборки на машине разработчика)
+cm_build/
+cm_dist/
+
+# Данные приложения (каждый клон создаёт свои)
+history.json
+data/
+
+# IDE и ОС
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Логи
+logs/
+*.log

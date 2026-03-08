@@ -1,0 +1,16 @@
+fastapi==0.115.5
+uvicorn[standard]==0.32.1
+python-multipart==0.0.17
+openai==1.55.3
+httpx==0.28.0
+python-dotenv==1.0.1
+pydantic-settings==2.6.1
+beautifulsoup4==4.12.3
+pypdf==5.1.0
+selenium>=4.15.0
+webdriver-manager>=4.0.0
+
+# Desktop (build.py): PyQt6 + PyInstaller
+PyQt6>=6.6.0
+PyQt6-WebEngine>=6.6.0
+pyinstaller>=6.0.0

@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Мониторинг конкурентов</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="layout">
+    <header class="header">
+      <h1>Мониторинг конкурентов</h1>
+      <p class="subtitle">Анализ текста и изображений с помощью ИИ</p>
+    </header>
+
+    <main class="main">
+      <section class="card input-card">
+        <h2>Ввод данных</h2>
+
+        <div class="tabs">
+          <button type="button" class="tab active" data-tab="text">Текст</button>
+          <button type="button" class="tab" data-tab="image">Изображение</button>
+          <button type="button" class="tab" data-tab="url">URL сайта</button>
+        </div>
+
+        <div id="panel-text" class="panel active">
+          <label for="text-input">Текст или PDF для анализа (кофейни)</label>
+          <textarea id="text-input" rows="5" placeholder="Вставьте текст с сайта, меню, рекламы кофейни..."></textarea>
+          <label for="pdf-input" class="label-secondary">или загрузите PDF</label>
+          <input type="file" id="pdf-input" accept=".pdf,application/pdf">
+        </div>
+
+        <div id="panel-image" class="panel">
+          <label for="image-input">Загрузите изображение (баннер, упаковка, скрин сайта)</label>
+          <input type="file" id="image-input" accept="image/*">
+        </div>
+
+        <div id="panel-url" class="panel">
+          <label for="url-input">URL страницы для парсинга и анализа</label>
+          <input type="url" id="url-input" placeholder="https://example.com">
+        </div>
+
+        <div class="actions">
+          <button type="button" id="btn-analyze" class="btn btn-primary">Проанализировать</button>
+          <button type="button" id="btn-history" class="btn btn-secondary">История</button>
+        </div>
+      </section>
+
+      <section class="card result-card">
+        <h2>Результат</h2>
+        <div id="result-placeholder" class="placeholder">Отправьте текст, изображение или URL и нажмите «Проанализировать».</div>
+        <div id="result-content" class="result-content hidden"></div>
+        <div id="result-error" class="error hidden"></div>
+      </section>
+
+      <section id="history-panel" class="card history-card hidden">
+        <h2>История запросов</h2>
+        <p class="subtitle history-subtitle">По каждому запросу сохранён ответ. Нажмите на запись, чтобы открыть полный результат.</p>
+        <div id="history-list"></div>
+        <button type="button" id="btn-close-history" class="btn btn-secondary">Закрыть</button>
+      </section>
+    </main>
+  </div>
+  <script src="/static/app.js"></script>
+</body>
+</html>
