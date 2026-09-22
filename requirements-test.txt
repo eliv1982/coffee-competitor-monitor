@@ -1,0 +1,14 @@
+# Backend + test dependencies only — no PyQt6/PyQt6-WebEngine/pyinstaller (desktop build deps).
+# Used by CI (.github/workflows/ci.yml) so it doesn't have to download the Qt/WebEngine
+# bundle just to run the offline test suite. Keep versions in sync with requirements.txt.
+fastapi==0.115.5
+uvicorn[standard]==0.32.1
+python-multipart==0.0.31
+openai==1.59.9
+httpx==0.28.1
+python-dotenv==1.0.1
+pydantic-settings==2.6.1
+beautifulsoup4==4.12.3
+pypdf==5.1.0
+selenium==4.27.1
+pytest==8.3.4

@@ -1,4 +1,14 @@
-"""Централизованная настройка логирования (максимальный уровень детализации)."""
+"""Централизованная настройка логирования.
+
+Уровень по умолчанию — INFO (см. backend.config.Settings.log_level); DEBUG
+можно включить через LOG_LEVEL для локальной отладки. По умолчанию в лог не
+пишутся тексты пользовательского ввода/ответов ИИ (только длины) и полные
+URL с query-строкой (см. backend.services.url_safety.redact_url) — только
+хост и путь. Доступ uvicorn (access log) отключается отдельно при запуске
+(run.py / desktop_main.py, access_log=False): его формат по умолчанию
+включает query-строку запроса, а собственный middleware в backend.main уже
+логирует каждый запрос безопасным образом.
+"""
 import logging
 import sys
 from pathlib import Path
@@ -19,15 +29,15 @@ class ShortNameFormatter(logging.Formatter):
 
 
 def setup_logging(
-    level: str = "DEBUG",
+    level: str = "INFO",
     log_file: str | Path | None = None,
 ) -> None:
     """
-    Настраивает корневой логгер и логгеры uvicorn/fastapi для максимального вывода.
+    Настраивает корневой логгер и логгеры uvicorn/fastapi.
     level: DEBUG, INFO, WARNING, ERROR, CRITICAL
     log_file: путь к файлу логов (если None — только консоль).
     """
-    log_level = getattr(logging, level.upper(), logging.DEBUG)
+    log_level = getattr(logging, level.upper(), logging.INFO)
 
     formatter = ShortNameFormatter(
         fmt="%(asctime)s | %(levelname)-8s | %(short_name)s | %(message)s",

@@ -126,9 +126,9 @@ function renderAnalyzeUrl(payload) {
     parts.push('<h3>Анализ сайта</h3>');
     if (a.summary) parts.push('<p>' + escapeHtml(a.summary) + '</p>');
     const scores = [];
-    if (a.design_score != null) scores.push('Дизайн: ' + a.design_score + ' / 10');
-    if (a.usability_score != null) scores.push('Удобство: ' + a.usability_score + ' / 10');
-    if (a.content_quality != null) scores.push('Качество контента: ' + a.content_quality + ' / 10');
+    if (a.design_score != null) scores.push('Дизайн: ' + escapeHtml(String(a.design_score)) + ' / 10');
+    if (a.usability_score != null) scores.push('Удобство: ' + escapeHtml(String(a.usability_score)) + ' / 10');
+    if (a.content_quality != null) scores.push('Качество контента: ' + escapeHtml(String(a.content_quality)) + ' / 10');
     if (scores.length) parts.push('<p>' + scores.join(' &nbsp;|&nbsp; ') + '</p>');
     if (a.unique_selling_points?.length) parts.push('<p><strong>Уникальные торговые предложения:</strong> ' + escapeHtml(a.unique_selling_points.join(', ')) + '</p>');
     if (a.franchise_info?.length) parts.push('<p><strong>Франшиза:</strong> ' + escapeHtml(a.franchise_info.join('; ')) + '</p>');
@@ -142,8 +142,8 @@ function renderAnalyzeUrl(payload) {
   const screen = payload.screenshot_analysis, text = payload.text_analysis;
   if (screen && typeof screen === 'object') {
     parts.push('<h3>Анализ скриншота</h3>');
-    if (screen.design_score != null) parts.push('<p>Дизайн: ' + screen.design_score + ' / 10</p>');
-    if (screen.usability_score != null) parts.push('<p>Удобство: ' + screen.usability_score + ' / 10</p>');
+    if (screen.design_score != null) parts.push('<p>Дизайн: ' + escapeHtml(String(screen.design_score)) + ' / 10</p>');
+    if (screen.usability_score != null) parts.push('<p>Удобство: ' + escapeHtml(String(screen.usability_score)) + ' / 10</p>');
     if (screen.unique_selling_points?.length) parts.push('<p><strong>Уникальные торговые предложения:</strong> ' + escapeHtml(screen.unique_selling_points.join(', ')) + '</p>');
     if (screen.additional_notes) parts.push('<p>' + escapeHtml(screen.additional_notes) + '</p>');
   }

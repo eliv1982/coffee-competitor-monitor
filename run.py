@@ -42,4 +42,7 @@ if __name__ == "__main__":
         port=port,
         reload=True,
         log_level="info",
+        # Собственный middleware в backend.main уже логирует каждый запрос без query-строки;
+        # стандартный access-лог uvicorn по умолчанию печатает полный путь запроса с query.
+        access_log=False,
     )

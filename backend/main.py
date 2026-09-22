@@ -4,11 +4,14 @@ import time
 from pathlib import Path
 
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from backend.config import get_settings
+from backend.config import get_cors_origins_list, get_settings
+from backend.errors import AppError
+from backend.local_guard import install_local_guard
 from backend.logging_config import setup_logging
 from backend.routers import analyze, analyze_url, history, parse_demo
 
@@ -21,22 +24,45 @@ app = FastAPI(
 )
 
 
+@app.exception_handler(AppError)
+async def app_error_handler(request: Request, exc: AppError):
+    """Typed application errors -> their mapped status code. Body is always {"error": "<safe message>"}."""
+    logger.warning(
+        "AppError: status=%s path=%s detail=%s", exc.status_code, request.url.path, exc.log_message
+    )
+    return JSONResponse(status_code=exc.status_code, content={"error": exc.message})
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error_handler(request: Request, exc: RequestValidationError):
+    """Keep FastAPI's normal 422 behavior, just log it consistently with everything else."""
+    logger.info("RequestValidationError: path=%s errors=%s", request.url.path, exc.errors())
+    return JSONResponse(status_code=422, content={"detail": exc.errors()})
+
+
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    """Любая необработанная ошибка возвращает 200 + JSON с полем error (чтобы клиент не видел 500 и HTML)."""
-    logger.exception("Unhandled exception: %s", exc)
+    """Any unhandled exception -> 500 with a sanitized message. Full traceback goes to the server log only."""
+    logger.exception("Unhandled exception on %s %s", request.method, request.url.path)
     return JSONResponse(
-        status_code=200,
-        content={"error": str(exc) or "Внутренняя ошибка сервера."},
+        status_code=500,
+        content={"error": "Внутренняя ошибка сервера."},
     )
 
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+install_local_guard(app)
+
+_cors_origins = get_cors_origins_list()
+if _cors_origins:
+    # Явный opt-in: фронтенд обслуживается с другого origin (например, отдельный dev-сервер).
+    # По умолчанию CORS не включается — /static и API раздаются одним и тем же процессом (тот же origin).
+    logger.warning("CORS enabled for explicit origins: %s", _cors_origins)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=_cors_origins,
+        allow_methods=["GET", "POST", "DELETE"],
+        allow_headers=["Content-Type"],
+    )
 
 
 @app.on_event("startup")
@@ -51,6 +77,12 @@ def on_startup():
         settings.log_level,
         settings.log_file,
     )
+    if settings.api_host not in ("127.0.0.1", "localhost", "::1"):
+        logger.warning(
+            "API_HOST=%s: сервер слушает не только localhost. Это осознанный opt-in "
+            "(аутентификации нет) — используйте только в доверенной сети.",
+            settings.api_host,
+        )
 
 
 @app.middleware("http")

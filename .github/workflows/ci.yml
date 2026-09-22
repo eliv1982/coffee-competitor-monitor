@@ -1,0 +1,47 @@
+name: CI
+
+# Lightweight offline checks only: compile/import + pytest, on push/PR to main.
+# Deliberately does NOT: call live OpenAI, hit real external websites, run the PyQt6
+# desktop GUI, or run a full PyInstaller build (see requirements-test.txt — no
+# PyQt6/PyQt6-WebEngine/pyinstaller here, only backend + test dependencies).
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: "pip"
+          cache-dependency-path: requirements-test.txt
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements-test.txt
+
+      - name: Compile check (syntax)
+        run: |
+          python -m compileall -q backend tests desktop_main.py run.py build.py
+          python -c "compile(open('competitionmonitor.spec', encoding='utf-8').read(), 'competitionmonitor.spec', 'exec')"
+
+      - name: Import smoke test (app wiring + OpenAPI generation)
+        run: |
+          python -c "
+          import backend.main as m
+          schema = m.app.openapi()
+          assert schema['paths']
+          print('OK: app imports and OpenAPI generates,', len(schema['paths']), 'paths')
+          "
+
+      - name: pytest
+        run: python -m pytest tests/ -v

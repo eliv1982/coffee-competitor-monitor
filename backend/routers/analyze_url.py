@@ -1,85 +1,89 @@
 """Endpoint: POST /analyze_url — анализ сайта по URL (Selenium: скриншот + текст, затем OpenAI)."""
 import base64
 import logging
-from fastapi import APIRouter, HTTPException
-from fastapi.responses import JSONResponse
+
+from fastapi import APIRouter
+from pydantic import BaseModel
+from starlette.concurrency import run_in_threadpool
 
 from backend.config import get_settings
-from backend.models.schemas import AnalyzeUrlRequest
+from backend.errors import InvalidInputError, ServiceUnavailableError, UpstreamError, UpstreamTimeoutError
+from backend.models.schemas import AnalyzeUrlRequest, UrlAnalysis
 from backend.services import history_service
-from backend.services.openai_service import analyze_url_unified
-from backend.services.parser_service import get_url_screenshot_and_text
-from openai import OpenAI
+from backend.services.openai_service import analyze_url_unified, get_openai_client
+from backend.services.parser_service import (
+    SELENIUM_NOT_INSTALLED_MESSAGE,
+    SELENIUM_TIMEOUT_MESSAGE,
+    get_url_screenshot_and_text,
+)
+from backend.services.url_safety import UnsafeURLError, ensure_scheme, redact_url
 
 logger = logging.getLogger("backend.routers.analyze_url")
 
 router = APIRouter(prefix="", tags=["analyze_url"])
 
 
-def _get_client() -> OpenAI:
-    settings = get_settings()
-    if not (settings.openai_api_key or "").strip():
-        raise HTTPException(status_code=503, detail="В .env задайте OPENAI_API_KEY.")
-    kwargs = {"api_key": settings.openai_api_key.strip()}
-    if getattr(settings, "openai_base_url", "") and settings.openai_base_url.strip():
-        kwargs["base_url"] = settings.openai_base_url.strip()
-    return OpenAI(**kwargs)
+class AnalyzeUrlResponse(BaseModel):
+    """Ответ POST /analyze_url."""
+
+    url: str
+    analysis: UrlAnalysis
 
 
-def _err(msg: str, **extra):
-    return JSONResponse(status_code=200, content={"error": msg, **extra})
-
-
-@router.post("/analyze_url")
+@router.post("/analyze_url", response_model=AnalyzeUrlResponse)
 async def analyze_url_endpoint(body: AnalyzeUrlRequest):
     """
-    По URL: Selenium открывает страницу, делает скриншот и извлекает текст.
-    Скриншот и текст передаются в OpenAI (два анализа по промптам из сценариев).
-    Результат: screenshot_analysis (по скриншоту) и text_analysis (по тексту), запись в историю.
+    По URL: Selenium открывает страницу, делает скриншот и извлекает текст (см.
+    backend.services.parser_service.get_url_screenshot_and_text — только начальный URL
+    проверяется политикой безопасности, только доверенные/публичные сайты поддерживаются).
+    Скриншот и текст передаются в OpenAI одним запросом (structured output).
+    Ответ: { "url": "...", "analysis": {...} }, запись сохраняется в историю.
     """
+    url = ensure_scheme(body.url)
+    logger.info("POST /analyze_url: url=%s", redact_url(url))
+    settings = get_settings()
+    timeout = getattr(settings, "parser_timeout", 15.0) or 15.0
+    if timeout < 20:
+        timeout = 20
+
     try:
-        url = body.url.strip()
-        if not url.startswith("http://") and not url.startswith("https://"):
-            url = "https://" + url
-        logger.info("POST /analyze_url: url=%s", url)
-        settings = get_settings()
-        timeout = getattr(settings, "parser_timeout", 15.0) or 15.0
-        if timeout < 20:
-            timeout = 20
-        user_agent = getattr(settings, "parser_user_agent", None)
-
-        screenshot_bytes, mime, extracted_text, err_msg = get_url_screenshot_and_text(
-            url, timeout=timeout, user_agent=user_agent
+        screenshot_bytes, mime, extracted_text, err_msg = await run_in_threadpool(
+            get_url_screenshot_and_text,
+            url,
+            timeout=timeout,
+            user_agent=settings.parser_user_agent,
+            allow_no_sandbox=settings.selenium_allow_no_sandbox,
+            max_page_source_chars=settings.max_remote_response_bytes,
         )
-        if err_msg:
-            return _err(err_msg, url=url, analysis=None)
+    except UnsafeURLError as e:
+        raise InvalidInputError(str(e)) from e
 
-        try:
-            client = _get_client()
-        except HTTPException as e:
-            return _err(e.detail or "Ошибка конфигурации (OPENAI_API_KEY).", url=url)
+    if err_msg or not screenshot_bytes:
+        if err_msg == SELENIUM_NOT_INSTALLED_MESSAGE:
+            raise ServiceUnavailableError(err_msg)
+        if err_msg == SELENIUM_TIMEOUT_MESSAGE:
+            raise UpstreamTimeoutError(err_msg)
+        raise UpstreamError(err_msg or "Не удалось получить скриншот и текст страницы.")
 
-        analysis = None
-        if screenshot_bytes:
-            b64 = base64.standard_b64encode(screenshot_bytes).decode("ascii")
-            analysis = analyze_url_unified(
-                client, settings.openai_model, b64, mime, extracted_text or ""
-            )
+    client = get_openai_client(settings)
+    analysis = await run_in_threadpool(
+        analyze_url_unified,
+        client,
+        settings.openai_model,
+        base64.standard_b64encode(screenshot_bytes).decode("ascii"),
+        mime,
+        extracted_text or "",
+        timeout=settings.openai_timeout,
+        max_ai_text_chars=settings.max_ai_text_chars,
+    )
 
-        summary = (analysis or {}).get("summary", "")[:200] if analysis else url
-        response_payload = {
-            "url": url,
-            "analysis": analysis,
-        }
-        history_service.add_entry(
-            settings.history_file,
-            settings.max_history_entries,
-            "analyze_url",
-            f"URL: {url}",
-            summary or url,
-            response_full=response_payload,
-        )
-        return JSONResponse(status_code=200, content=response_payload)
-    except Exception as e:
-        logger.exception("POST /analyze_url error: %s", e)
-        return _err(str(e) or "Внутренняя ошибка.")
+    response_payload = {"url": url, "analysis": analysis.model_dump(mode="json")}
+    history_service.add_entry(
+        settings.history_file,
+        settings.max_history_entries,
+        "analyze_url",
+        f"URL: {url}",
+        (analysis.summary or url)[:200],
+        response_full=response_payload,
+    )
+    return response_payload

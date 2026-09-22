@@ -69,6 +69,7 @@ def run_server():
             host="127.0.0.1",
             port=port,
             log_level="warning",
+            access_log=False,
         )
     except Exception as e:
         tb = traceback.format_exc()

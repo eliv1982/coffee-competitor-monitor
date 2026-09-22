@@ -1,25 +1,25 @@
 from backend.models.schemas import (
+    AnalyzeUrlRequest,
     CompetitorAnalysis,
     HistoryItem,
     HistoryResponse,
     ImageAnalysis,
+    ParseDemoBatchResponse,
     ParsedContent,
     ParseDemoRequest,
-    ParseDemoResponse,
     TextAnalysisRequest,
-    TextAnalysisResponse,
-    ImageAnalysisResponse,
+    UrlAnalysis,
 )
 
 __all__ = [
     "TextAnalysisRequest",
-    "TextAnalysisResponse",
-    "ImageAnalysisResponse",
+    "ParseDemoRequest",
+    "AnalyzeUrlRequest",
     "CompetitorAnalysis",
     "ImageAnalysis",
-    "ParseDemoRequest",
-    "ParseDemoResponse",
+    "UrlAnalysis",
     "ParsedContent",
+    "ParseDemoBatchResponse",
     "HistoryItem",
     "HistoryResponse",
 ]

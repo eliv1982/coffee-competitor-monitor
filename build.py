@@ -82,8 +82,12 @@ def main():
 
     exe_path = distpath / DIST_NAME / ("competitionmonitor.exe" if sys.platform == "win32" else "competitionmonitor")
     print()
-    print("Сборка успешна.")
+    print("Сборка успешна (папка-дистрибутив, onedir — не единый exe-файл).")
     print(f"Запуск: {exe_path}")
+    print()
+    print(".env НЕ входит в сборку (проверяется assert'ом в competitionmonitor.spec).")
+    print("Настройте OPENAI_API_KEY переменной окружения ОС или файлом:")
+    print(r"  %APPDATA%\CompetitionMonitor\.env")
     return 0
 
 

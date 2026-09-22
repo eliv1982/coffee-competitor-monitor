@@ -1,13 +1,17 @@
-"""Pydantic schemas for API requests and responses (aligned with Competitor Monitor API)."""
-from typing import Any
+"""Pydantic schemas for API requests and responses (aligned with Competitor Monitor API).
 
+These double as the structured-output contract for OpenAI (see
+backend.services.openai_service): the same models are passed as
+`response_format` to the OpenAI SDK's structured-output call, so the shape
+returned by the API is exactly the shape the model was constrained to produce.
+"""
 from pydantic import BaseModel, Field
 
 
 # === Requests ===
 
 class TextAnalysisRequest(BaseModel):
-    """Запрос на анализ текста."""
+    """Запрос на анализ текста (JSON-путь; см. также multipart-путь с PDF в docs.md)."""
 
     text: str = Field(..., min_length=10, description="Текст для анализа (минимум 10 символов)")
 
@@ -24,10 +28,10 @@ class AnalyzeUrlRequest(BaseModel):
     url: str = Field(..., min_length=1, description="URL сайта для анализа")
 
 
-# === Analysis models (inner payload) ===
+# === Analysis models (also used as OpenAI structured-output response_format) ===
 
 class CompetitorAnalysis(BaseModel):
-    """Структурированный анализ конкурента (ниша: кофейни)."""
+    """Структурированный анализ конкурента по тексту (ниша: кофейни)."""
 
     strengths: list[str] = Field(default_factory=list, description="Сильные стороны")
     weaknesses: list[str] = Field(default_factory=list, description="Слабые стороны")
@@ -55,6 +59,22 @@ class ImageAnalysis(BaseModel):
     content_quality: int = Field(0, ge=0, le=10, description="Качество контента на странице (0-10)")
 
 
+class UrlAnalysis(BaseModel):
+    """Единый анализ сайта по скриншоту и тексту (POST /analyze_url)."""
+
+    summary: str = Field("", description="Краткое резюме анализа сайта")
+    design_score: int = Field(0, ge=0, le=10, description="Оценка дизайна по скриншоту (0-10)")
+    usability_score: int = Field(0, ge=0, le=10, description="Удобство навигации/интерфейса (0-10)")
+    content_quality: int = Field(0, ge=0, le=10, description="Качество контента (0-10)")
+    unique_selling_points: list[str] = Field(default_factory=list, description="Уникальные торговые предложения")
+    franchise_info: list[str] = Field(default_factory=list, description="Условия франшизы, если есть на странице")
+    price_category: str = Field("", description="Ценовая категория или пустая строка")
+    target_audience: str = Field("", description="Целевая аудитория, если понятно из контента")
+    strengths: list[str] = Field(default_factory=list, description="Сильные стороны сайта")
+    weaknesses: list[str] = Field(default_factory=list, description="Слабые стороны / что улучшить")
+    recommendations: list[str] = Field(default_factory=list, description="Рекомендации")
+
+
 class ParsedContent(BaseModel):
     """Результат парсинга страницы."""
 
@@ -66,30 +86,13 @@ class ParsedContent(BaseModel):
     error: str | None = None
 
 
-# === Wrapped API responses ===
+class ParseDemoBatchResponse(BaseModel):
+    """Ответ POST /parse_demo/batch. Каждый элемент results имеет форму ParsedContent —
+    error непустой и analysis=None для URL, который не удалось обработать (см. docs.md:
+    частичный успех — нормальный исход для этой пакетной операции)."""
 
-class TextAnalysisResponse(BaseModel):
-    """Ответ на анализ текста."""
-
-    success: bool = True
-    analysis: CompetitorAnalysis | None = None
-    error: str | None = None
-
-
-class ImageAnalysisResponse(BaseModel):
-    """Ответ на анализ изображения."""
-
-    success: bool = True
-    analysis: ImageAnalysis | None = None
-    error: str | None = None
-
-
-class ParseDemoResponse(BaseModel):
-    """Ответ на парсинг и анализ по URL."""
-
-    success: bool = True
-    data: ParsedContent | None = None
-    error: str | None = None
+    results: list[ParsedContent] = Field(default_factory=list)
+    total: int = 0
 
 
 # === History ===
