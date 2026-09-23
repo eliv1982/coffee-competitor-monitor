@@ -93,6 +93,13 @@ def resolve_hostname(hostname: str, *, resolver=socket.getaddrinfo) -> list[str]
         infos = resolver(hostname, None, proto=socket.IPPROTO_TCP)
     except socket.gaierror as e:
         raise UnsafeURLError(f"Не удалось разрешить адрес хоста: {hostname}") from e
+    except UnicodeError as e:
+        # A malformed hostname (e.g. a DNS label over 63 octets, or invalid IDNA input) makes
+        # the stdlib's own IDNA encoding step inside getaddrinfo() raise UnicodeError/
+        # UnicodeEncodeError directly — distinct from socket.gaierror and not caught by it —
+        # before any actual DNS lookup happens. Must still become a sanitized 4xx, not an
+        # unhandled 500 (see backend.errors / backend.main's exception handlers).
+        raise UnsafeURLError(f"Некорректное имя хоста: {hostname}") from e
     ips = sorted({info[4][0] for info in infos if info and info[4]})
     if not ips:
         raise UnsafeURLError(f"Не удалось разрешить адрес хоста: {hostname}")

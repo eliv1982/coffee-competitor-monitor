@@ -31,17 +31,32 @@ T = TypeVar("T", bound=BaseModel)
 
 DEFAULT_TIMEOUT = 60.0
 
+# The official OpenAI API only (portfolio scope — see docs.md). Passed explicitly to every
+# OpenAI() construction below: the SDK itself falls back to the ambient OPENAI_BASE_URL
+# environment variable whenever base_url is left as None (openai._client.OpenAI.__init__:
+# `if base_url is None: base_url = os.environ.get("OPENAI_BASE_URL")`), so an unset/ambient
+# OPENAI_BASE_URL in the process environment could otherwise silently redirect every request
+# to an arbitrary third-party host. Passing base_url explicitly bypasses that fallback branch
+# entirely — this is the SDK's own documented mechanism for pinning the endpoint, not a hack.
+OFFICIAL_OPENAI_BASE_URL = "https://api.openai.com/v1"
+
 
 def get_openai_client(settings) -> OpenAI:
     """Build a client for the official OpenAI API using the configured key/timeout.
 
     Only api.openai.com is supported by this project (portfolio scope — see docs.md);
-    there is deliberately no OPENAI_BASE_URL/provider-abstraction mechanism here.
+    there is deliberately no OPENAI_BASE_URL/provider-abstraction mechanism here. base_url is
+    always pinned to OFFICIAL_OPENAI_BASE_URL so an ambient OPENAI_BASE_URL environment
+    variable can never redirect this client to a third-party endpoint.
     Raises ServiceUnavailableError if OPENAI_API_KEY isn't configured.
     """
     if not (settings.openai_api_key or "").strip():
         raise ServiceUnavailableError("В .env задайте OPENAI_API_KEY.")
-    return OpenAI(api_key=settings.openai_api_key.strip(), timeout=settings.openai_timeout)
+    return OpenAI(
+        api_key=settings.openai_api_key.strip(),
+        timeout=settings.openai_timeout,
+        base_url=OFFICIAL_OPENAI_BASE_URL,
+    )
 
 
 SYSTEM_COFFEE = """Ты — эксперт по анализу кофеен и кофейного бизнеса. Отвечай на русском языке."""
@@ -184,6 +199,14 @@ def _run_structured(
             log_message=str(e),
         ) from e
 
+    if not completion.choices:
+        # A malformed/empty structured-output response (no choices at all) — distinct from a
+        # normal refusal or parse failure below, but still an upstream contract violation, not
+        # a local bug: must not raise IndexError (-> unhandled 500) or return fabricated data.
+        raise UpstreamError(
+            "OpenAI вернул пустой структурированный ответ (нет choices).",
+            log_message="completion.choices is empty",
+        )
     choice = completion.choices[0]
     if choice.message.refusal:
         logger.warning("openai refusal: model=%s refusal_len=%d", model, len(choice.message.refusal))

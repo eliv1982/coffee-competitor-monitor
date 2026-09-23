@@ -247,22 +247,20 @@ def parse_url_selenium(
         return "", "", "", SELENIUM_NOT_INSTALLED_MESSAGE
     validate_public_http_url(url)
     logger.info("parse_url_selenium: url=%s timeout=%s", redact_url(url), timeout)
+    driver = None
     try:
         driver = _new_chrome_driver(user_agent, allow_no_sandbox=allow_no_sandbox)
-        try:
-            driver.set_page_load_timeout(timeout)
-            driver.get(url)
-            html = driver.page_source
-            if len(html) > max_page_source_chars:
-                html = html[:max_page_source_chars]
-            title, h1, first_paragraph = _extract_from_html(html)
-            logger.info(
-                "parse_url_selenium success: title_len=%d h1_len=%d paragraph_len=%d",
-                len(title), len(h1), len(first_paragraph),
-            )
-            return title, h1, first_paragraph, ""
-        finally:
-            driver.quit()
+        driver.set_page_load_timeout(timeout)
+        driver.get(url)
+        html = driver.page_source
+        if len(html) > max_page_source_chars:
+            html = html[:max_page_source_chars]
+        title, h1, first_paragraph = _extract_from_html(html)
+        logger.info(
+            "parse_url_selenium success: title_len=%d h1_len=%d paragraph_len=%d",
+            len(title), len(h1), len(first_paragraph),
+        )
+        return title, h1, first_paragraph, ""
     except _SeleniumTimeoutException as e:
         logger.warning("parse_url_selenium timeout: url=%s error=%s", redact_url(url), e)
         return "", "", "", SELENIUM_TIMEOUT_MESSAGE
@@ -271,6 +269,19 @@ def parse_url_selenium(
             "parse_url_selenium failed: url=%s error_type=%s error=%s", redact_url(url), type(e).__name__, e
         )
         return "", "", "", SELENIUM_UPSTREAM_ERROR_MESSAGE
+    finally:
+        # A driver.quit() failure here must never mask the classification already decided
+        # above (e.g. a real navigation TimeoutException must still surface as a timeout, not
+        # get replaced by whatever quit() itself raised) — see docs.md / item 4 of the
+        # corrective pass. Logged only; never re-raised or leaked to the caller. `driver` is
+        # None if construction itself failed (nothing to quit in that case).
+        if driver is not None:
+            try:
+                driver.quit()
+            except Exception as quit_err:
+                logger.warning(
+                    "parse_url_selenium: driver.quit() failed: url=%s error=%s", redact_url(url), quit_err
+                )
 
 
 def parse_url_auto(
@@ -351,23 +362,21 @@ def get_url_screenshot_and_text(
         return None, "image/png", "", SELENIUM_NOT_INSTALLED_MESSAGE
     validate_public_http_url(url)
     logger.info("get_url_screenshot_and_text: url=%s timeout=%s", redact_url(url), timeout)
+    driver = None
     try:
         driver = _new_chrome_driver(user_agent, allow_no_sandbox=allow_no_sandbox)
-        try:
-            driver.set_page_load_timeout(timeout)
-            driver.get(url)
-            screenshot_png = driver.get_screenshot_as_png()
-            html = driver.page_source
-            if len(html) > max_page_source_chars:
-                html = html[:max_page_source_chars]
-            extracted_text = _extract_full_text(html)
-            logger.info(
-                "get_url_screenshot_and_text success: screenshot_len=%d text_len=%d",
-                len(screenshot_png or []), len(extracted_text),
-            )
-            return screenshot_png, "image/png", extracted_text, ""
-        finally:
-            driver.quit()
+        driver.set_page_load_timeout(timeout)
+        driver.get(url)
+        screenshot_png = driver.get_screenshot_as_png()
+        html = driver.page_source
+        if len(html) > max_page_source_chars:
+            html = html[:max_page_source_chars]
+        extracted_text = _extract_full_text(html)
+        logger.info(
+            "get_url_screenshot_and_text success: screenshot_len=%d text_len=%d",
+            len(screenshot_png or []), len(extracted_text),
+        )
+        return screenshot_png, "image/png", extracted_text, ""
     except _SeleniumTimeoutException as e:
         logger.warning("get_url_screenshot_and_text timeout: url=%s error=%s", redact_url(url), e)
         return None, "image/png", "", SELENIUM_TIMEOUT_MESSAGE
@@ -377,3 +386,15 @@ def get_url_screenshot_and_text(
             redact_url(url), type(e).__name__, e,
         )
         return None, "image/png", "", SELENIUM_UPSTREAM_ERROR_MESSAGE
+    finally:
+        # See parse_url_selenium above: a driver.quit() failure here must never mask the
+        # classification already decided (timeout vs. generic Selenium failure vs. success).
+        # `driver` is None if construction itself failed (nothing to quit in that case).
+        if driver is not None:
+            try:
+                driver.quit()
+            except Exception as quit_err:
+                logger.warning(
+                    "get_url_screenshot_and_text: driver.quit() failed: url=%s error=%s",
+                    redact_url(url), quit_err,
+                )

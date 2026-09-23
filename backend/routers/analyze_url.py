@@ -42,9 +42,7 @@ async def analyze_url_endpoint(body: AnalyzeUrlRequest):
     url = ensure_scheme(body.url)
     logger.info("POST /analyze_url: url=%s", redact_url(url))
     settings = get_settings()
-    timeout = getattr(settings, "parser_timeout", 15.0) or 15.0
-    if timeout < 20:
-        timeout = 20
+    timeout = settings.parser_timeout
 
     try:
         screenshot_bytes, mime, extracted_text, err_msg = await run_in_threadpool(

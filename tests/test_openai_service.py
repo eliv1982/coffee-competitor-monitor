@@ -121,6 +121,16 @@ def test_no_result_is_never_silently_defaulted():
         assert result is None  # unreachable; the call above must raise
 
 
+def test_empty_choices_raises_upstream_error_not_index_error():
+    """Regression (final corrective pass, item 5): a malformed/empty structured-output
+    completion (choices=[]) previously reached `completion.choices[0]` directly and raised an
+    unhandled IndexError -> 500. Must be treated as a malformed upstream response -> 502."""
+    empty_completion = SimpleNamespace(choices=[])
+    client = _client_returning(empty_completion)
+    with pytest.raises(UpstreamError):
+        openai_service.analyze_text(client, "gpt-4o-mini", "some text")
+
+
 def test_content_filter_finish_reason_raises_upstream_error():
     """Raised by the SDK's own .parse() when finish_reason=="content_filter" — distinct from
     (and previously uncaught alongside) choice.message.refusal; used to fall through to the
@@ -165,6 +175,22 @@ def test_get_openai_client_uses_official_api_only():
     client = openai_service.get_openai_client(settings)
     assert str(client.base_url).startswith("https://api.openai.com")
     assert client.timeout == 42.0
+
+
+def test_get_openai_client_ignores_ambient_openai_base_url_env_var(monkeypatch):
+    """Regression (final corrective pass, item 1): the OpenAI SDK itself falls back to the
+    ambient OPENAI_BASE_URL environment variable whenever base_url is left as None
+    (openai._client.OpenAI.__init__: `if base_url is None: base_url = os.environ.get(...)`),
+    which could otherwise silently redirect every request to an arbitrary third-party host.
+    get_openai_client must always pin base_url explicitly so this ambient variable is never
+    consulted. No live OpenAI request is made — this only inspects client construction."""
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://third-party.invalid/v1/")
+    settings = SimpleNamespace(openai_api_key="sk-test-000000000000000000000000000000", openai_timeout=42.0)
+
+    client = openai_service.get_openai_client(settings)
+
+    assert str(client.base_url).startswith("https://api.openai.com")
+    assert "third-party.invalid" not in str(client.base_url)
 
 
 def test_get_openai_client_raises_when_api_key_missing():

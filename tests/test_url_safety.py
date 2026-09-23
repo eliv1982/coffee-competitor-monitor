@@ -4,7 +4,13 @@ import socket
 
 import pytest
 
-from backend.services.url_safety import UnsafeURLError, ensure_scheme, redact_url, validate_public_http_url
+from backend.services.url_safety import (
+    UnsafeURLError,
+    ensure_scheme,
+    redact_url,
+    resolve_hostname,
+    validate_public_http_url,
+)
 
 
 def _fake_resolver(ip: str):
@@ -122,6 +128,47 @@ def test_validate_public_http_url_accepts_mixed_case_scheme():
     assert safe.scheme == "http"
     safe2 = validate_public_http_url("HtTpS://example.invalid/", resolver=_fake_resolver("8.8.8.8"))
     assert safe2.scheme == "https"
+
+
+# --- final corrective pass, item 2: malformed hostnames (oversized DNS label / invalid IDNA
+# input) must become UnsafeURLError, never an unhandled UnicodeError/UnicodeEncodeError that
+# would escape as a 500. socket.getaddrinfo IDNA-encodes the hostname internally *before* any
+# actual network access, so these raise purely from string processing — no real DNS/network. ---
+
+def _unicode_error_resolver(host, port, *args, **kwargs):
+    raise UnicodeError("label empty or too long")
+
+
+def test_resolve_hostname_rejects_unicode_error_from_resolver():
+    with pytest.raises(UnsafeURLError):
+        resolve_hostname("whatever.invalid", resolver=_unicode_error_resolver)
+
+
+def test_validate_public_http_url_rejects_unicode_error_from_resolver():
+    with pytest.raises(UnsafeURLError):
+        validate_public_http_url("http://whatever.invalid/", resolver=_unicode_error_resolver)
+
+
+def test_resolve_hostname_rejects_real_oversized_dns_label():
+    """End-to-end with the real stdlib resolver (no mock): a hostname whose label exceeds the
+    63-octet DNS limit makes Python's IDNA codec raise UnicodeError inside socket.getaddrinfo
+    before any actual network I/O — this must not escape resolve_hostname unhandled."""
+    oversized_label_host = "a" * 100 + ".invalid"
+    with pytest.raises(UnsafeURLError):
+        resolve_hostname(oversized_label_host)
+
+
+def test_validate_public_http_url_rejects_real_oversized_dns_label():
+    oversized_label_url = "http://" + "a" * 100 + ".invalid/"
+    with pytest.raises(UnsafeURLError):
+        validate_public_http_url(oversized_label_url)
+
+
+def test_validate_public_http_url_rejects_real_malformed_idna_empty_label():
+    """A different malformed-hostname shape (empty label between dots) triggers the same
+    stdlib IDNA UnicodeError class as the oversized-label case, via a different code path."""
+    with pytest.raises(UnsafeURLError):
+        validate_public_http_url("http://sub..example.invalid/")
 
 
 # --- ensure_scheme: router-level "add https:// if missing" normalization ---

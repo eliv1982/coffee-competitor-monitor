@@ -179,6 +179,115 @@ def test_get_url_screenshot_and_text_timeout_maps_to_timeout_message(monkeypatch
     fake_driver.quit.assert_called_once()
 
 
+# --- final corrective pass, item 4: driver.quit() failure must never mask the primary
+# Selenium outcome (timeout classification, generic-error classification, or a successful
+# result) that was already decided before cleanup ran. ---
+
+def test_parse_url_selenium_timeout_survives_failing_quit(monkeypatch):
+    from selenium.common.exceptions import TimeoutException
+
+    fake_driver = MagicMock()
+    fake_driver.get.side_effect = TimeoutException("page load timed out")
+    fake_driver.quit.side_effect = RuntimeError("quit boom: /local/session/path")
+    monkeypatch.setattr(parser_service.webdriver, "Chrome", MagicMock(return_value=fake_driver))
+    monkeypatch.setattr(parser_service, "_SELENIUM_AVAILABLE", True)
+    monkeypatch.setattr(parser_service, "validate_public_http_url", lambda url, **kw: None)
+
+    title, h1, paragraph, err = parser_service.parse_url_selenium("https://competitor.example.com/", timeout=5.0)
+    assert err == parser_service.SELENIUM_TIMEOUT_MESSAGE
+    assert "quit boom" not in err
+    fake_driver.quit.assert_called_once()
+
+
+def test_parse_url_selenium_generic_error_survives_failing_quit(monkeypatch):
+    fake_driver = MagicMock()
+    fake_driver.get.side_effect = RuntimeError("navigation boom")
+    fake_driver.quit.side_effect = RuntimeError("quit boom")
+    monkeypatch.setattr(parser_service.webdriver, "Chrome", MagicMock(return_value=fake_driver))
+    monkeypatch.setattr(parser_service, "_SELENIUM_AVAILABLE", True)
+    monkeypatch.setattr(parser_service, "validate_public_http_url", lambda url, **kw: None)
+
+    title, h1, paragraph, err = parser_service.parse_url_selenium("https://competitor.example.com/", timeout=5.0)
+    assert err == parser_service.SELENIUM_UPSTREAM_ERROR_MESSAGE
+    fake_driver.quit.assert_called_once()
+
+
+def test_parse_url_selenium_success_survives_failing_quit(monkeypatch):
+    """Cleanup failing after a successful navigation must not turn success into an error."""
+    fake_driver = MagicMock()
+    fake_driver.page_source = HTML_PAGE.decode("utf-8")
+    fake_driver.quit.side_effect = RuntimeError("quit boom")
+    monkeypatch.setattr(parser_service.webdriver, "Chrome", MagicMock(return_value=fake_driver))
+    monkeypatch.setattr(parser_service, "_SELENIUM_AVAILABLE", True)
+    monkeypatch.setattr(parser_service, "validate_public_http_url", lambda url, **kw: None)
+
+    title, h1, paragraph, err = parser_service.parse_url_selenium("https://competitor.example.com/", timeout=5.0)
+    assert err == ""
+    assert title == "Coffee Shop"
+    fake_driver.quit.assert_called_once()
+
+
+def test_get_url_screenshot_and_text_timeout_survives_failing_quit(monkeypatch):
+    from selenium.common.exceptions import TimeoutException
+
+    fake_driver = MagicMock()
+    fake_driver.get.side_effect = TimeoutException("timed out")
+    fake_driver.quit.side_effect = RuntimeError("quit boom")
+    monkeypatch.setattr(parser_service.webdriver, "Chrome", MagicMock(return_value=fake_driver))
+    monkeypatch.setattr(parser_service, "_SELENIUM_AVAILABLE", True)
+    monkeypatch.setattr(parser_service, "validate_public_http_url", lambda url, **kw: None)
+
+    screenshot, mime, text, err = parser_service.get_url_screenshot_and_text("https://competitor.example.com/")
+    assert screenshot is None
+    assert err == parser_service.SELENIUM_TIMEOUT_MESSAGE
+    fake_driver.quit.assert_called_once()
+
+
+def test_get_url_screenshot_and_text_generic_error_survives_failing_quit(monkeypatch):
+    fake_driver = MagicMock()
+    fake_driver.get.side_effect = RuntimeError("navigation boom")
+    fake_driver.quit.side_effect = RuntimeError("quit boom")
+    monkeypatch.setattr(parser_service.webdriver, "Chrome", MagicMock(return_value=fake_driver))
+    monkeypatch.setattr(parser_service, "_SELENIUM_AVAILABLE", True)
+    monkeypatch.setattr(parser_service, "validate_public_http_url", lambda url, **kw: None)
+
+    screenshot, mime, text, err = parser_service.get_url_screenshot_and_text("https://competitor.example.com/")
+    assert screenshot is None
+    assert err == parser_service.SELENIUM_UPSTREAM_ERROR_MESSAGE
+    fake_driver.quit.assert_called_once()
+
+
+def test_get_url_screenshot_and_text_success_survives_failing_quit(monkeypatch):
+    """Cleanup failing after a successful screenshot+text fetch must not turn success into an error."""
+    fake_driver = MagicMock()
+    fake_driver.get_screenshot_as_png.return_value = b"\x89PNG\r\n\x1a\n" + b"0" * 16
+    fake_driver.page_source = HTML_PAGE.decode("utf-8")
+    fake_driver.quit.side_effect = RuntimeError("quit boom")
+    monkeypatch.setattr(parser_service.webdriver, "Chrome", MagicMock(return_value=fake_driver))
+    monkeypatch.setattr(parser_service, "_SELENIUM_AVAILABLE", True)
+    monkeypatch.setattr(parser_service, "validate_public_http_url", lambda url, **kw: None)
+
+    screenshot, mime, text, err = parser_service.get_url_screenshot_and_text("https://competitor.example.com/")
+    assert err == ""
+    assert screenshot is not None
+    fake_driver.quit.assert_called_once()
+
+
+def test_get_url_screenshot_and_text_driver_construction_failure_maps_to_upstream_error(monkeypatch):
+    """A construction failure (e.g. Chrome binary missing) has no driver to quit — must still
+    map to the sanitized generic Selenium error rather than propagating an unhandled exception."""
+    monkeypatch.setattr(
+        parser_service.webdriver, "Chrome", MagicMock(side_effect=RuntimeError("no chrome binary at /x"))
+    )
+    monkeypatch.setattr(parser_service, "_SELENIUM_AVAILABLE", True)
+    monkeypatch.setattr(parser_service, "validate_public_http_url", lambda url, **kw: None)
+
+    screenshot, mime, text, err = parser_service.get_url_screenshot_and_text("https://competitor.example.com/")
+    assert screenshot is None
+    assert err == parser_service.SELENIUM_UPSTREAM_ERROR_MESSAGE
+    assert "no chrome binary" not in err
+
+
 def test_selenium_not_installed_returns_service_message(monkeypatch):
     monkeypatch.setattr(parser_service, "_SELENIUM_AVAILABLE", False)
     screenshot, mime, text, err = parser_service.get_url_screenshot_and_text("https://competitor.example.com/")

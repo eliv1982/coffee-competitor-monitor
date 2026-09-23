@@ -2,9 +2,14 @@
 router actually calls a service with the right arguments: parser config wiring (item 3),
 sanitized/correctly-classified Selenium failures (item 4), request-size limits (item 5),
 URL scheme/edge cases (item 6), and configured OpenAI timeouts (item 7). OpenAI and the
-parser/Selenium layer are always mocked; no live calls or real network."""
+parser/Selenium layer are always mocked; no live calls or real network.
+
+Sections below marked "final corrective pass, item N" are from a later, separate
+acceptance-review pass with its own independent item numbering (unrelated to the item N
+above it may share a number with) — see each section's own comment for what it covers."""
 from unittest.mock import MagicMock
 
+from backend.errors import UpstreamError
 from backend.models.schemas import CompetitorAnalysis, UrlAnalysis
 from backend.services.parser_service import (
     SELENIUM_NOT_INSTALLED_MESSAGE,
@@ -54,6 +59,25 @@ def test_parse_demo_batch_passes_configured_httpx_settings_to_parser(client, mon
     assert kwargs["connect_timeout"] == 7.0
     assert kwargs["max_redirects"] == 1
     assert kwargs["max_response_bytes"] == 999
+
+
+# === final corrective pass, item 3: PARSER_TIMEOUT must reach Selenium unchanged — no more
+# hidden `if timeout < 20: timeout = 20` clamp silently overriding a lower configured value ===
+
+def test_analyze_url_honors_configured_parser_timeout_below_previous_hidden_floor(client, monkeypatch):
+    monkeypatch.setenv("PARSER_TIMEOUT", "5")
+    mock_screenshot = MagicMock(
+        return_value=(b"\x89PNG\r\n\x1a\n" + b"0" * 32, "image/png", "some page text", "")
+    )
+    monkeypatch.setattr("backend.routers.analyze_url.get_url_screenshot_and_text", mock_screenshot)
+    monkeypatch.setattr(
+        "backend.routers.analyze_url.analyze_url_unified", MagicMock(return_value=UrlAnalysis(summary="ok"))
+    )
+
+    resp = client.post("/analyze_url", json={"url": "https://example.com"})
+
+    assert resp.status_code == 200
+    assert mock_screenshot.call_args.kwargs["timeout"] == 5.0
 
 
 def test_analyze_url_passes_configured_response_bytes_as_page_source_cap(client, monkeypatch):
@@ -155,7 +179,20 @@ def test_analyze_text_multipart_too_many_files_returns_400(client):
     assert resp.status_code == 400
 
 
-# === item 6: URL normalization / malformed-input edge cases ===
+# === final corrective pass, item 5: empty structured-output choices -> 502, not an
+# unhandled 500 (the openai_service unit test already covers the IndexError fix directly;
+# this proves the classification survives end-to-end through the router/exception handler) ===
+
+def test_analyze_text_empty_openai_choices_maps_to_502_not_500(client, monkeypatch):
+    monkeypatch.setattr(
+        "backend.routers.analyze.analyze_text",
+        MagicMock(side_effect=UpstreamError("OpenAI вернул пустой структурированный ответ (нет choices).")),
+    )
+    resp = client.post("/analyze_text", json={"text": "A coffee shop with excellent pastries and espresso."})
+    assert resp.status_code == 502
+
+
+# === item 6 (original hardening pass numbering): URL normalization / malformed-input edge cases ===
 
 def test_parse_demo_malformed_port_returns_400_not_500(client):
     resp = client.post("/parse_demo", json={"url": "http://example.com:bad/"})
@@ -164,6 +201,30 @@ def test_parse_demo_malformed_port_returns_400_not_500(client):
 
 def test_analyze_url_malformed_port_returns_400_not_500(client):
     resp = client.post("/analyze_url", json={"url": "http://example.com:bad/"})
+    assert resp.status_code == 400
+
+
+# --- final corrective pass, item 2: malformed hostname (oversized DNS label / malformed IDNA)
+# must be a sanitized 400, never an unhandled UnicodeError -> 500. No real DNS/network happens
+# here: Python's IDNA codec inside socket.getaddrinfo raises before any actual lookup. ---
+
+def test_parse_demo_oversized_dns_label_returns_400_not_500(client):
+    resp = client.post("/parse_demo", json={"url": "http://" + "a" * 100 + ".invalid/"})
+    assert resp.status_code == 400
+
+
+def test_analyze_url_oversized_dns_label_returns_400_not_500(client):
+    resp = client.post("/analyze_url", json={"url": "http://" + "a" * 100 + ".invalid/"})
+    assert resp.status_code == 400
+
+
+def test_parse_demo_malformed_idna_empty_label_returns_400_not_500(client):
+    resp = client.post("/parse_demo", json={"url": "http://sub..example.invalid/"})
+    assert resp.status_code == 400
+
+
+def test_analyze_url_malformed_idna_empty_label_returns_400_not_500(client):
+    resp = client.post("/analyze_url", json={"url": "http://sub..example.invalid/"})
     assert resp.status_code == 400
 
 
